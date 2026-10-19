@@ -1,8 +1,7 @@
 name: Deploy dashboard to GitHub Pages
 
+# Manual only: the live site is published from the gh-pages branch (local build/web).
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
