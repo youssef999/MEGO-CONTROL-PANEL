@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../mego_client_app"
+		},
+		{
+			"path": "../../mego_driver_app"
+		},
+		{
+			"path": ".."
+		}
+	],
+	"settings": {}
+}

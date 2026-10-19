@@ -1,0 +1,71 @@
+name: Deploy dashboard to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+
+      # .env is gitignored; it is bundled as a Flutter asset at build time.
+      - name: Create .env from repository secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_APP_SECRET: ${{ secrets.SUPABASE_APP_SECRET }}
+        run: |
+          printf 'SUPABASE_URL=%s\nSUPABASE_ANON_KEY=%s\nSUPABASE_APP_SECRET=%s\n' \
+            "$SUPABASE_URL" "$SUPABASE_ANON_KEY" "$SUPABASE_APP_SECRET" > .env
+
+      # fcm_keys.dart is not committed; rebuild it from the FCM_SERVICE_ACCOUNT_JSON secret.
+      - name: Create fcm_keys.dart from repository secret
+        env:
+          FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ ! -f lib/core/res/fcm_keys.dart ]; then
+            printf 'const Map<String, dynamic> fcmServiceAccountKey = %s;\n' \
+              "$FCM_SERVICE_ACCOUNT_JSON" > lib/core/res/fcm_keys.dart
+          fi
+
+      - run: flutter pub get
+
+      - name: Build web
+        run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
+
+      # SPA fallback so refreshing a deep link does not 404.
+      - run: cp build/web/index.html build/web/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
