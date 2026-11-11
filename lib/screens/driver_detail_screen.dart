@@ -13,6 +13,7 @@ import '../services/account_decision_notifier.dart';
 import '../services/admin_notification_sender.dart';
 import '../services/supabase_service.dart';
 import '../widgets/firebase_storage_image.dart';
+import 'food_checkout_detail_screen.dart';
 
 class DriverDetailScreen extends StatefulWidget {
   final DriverModel driver;
@@ -1095,48 +1096,71 @@ class _DriverDetailScreenState extends State<DriverDetailScreen>
         final restaurant = order.restaurantId != null
             ? _restaurantsMap[order.restaurantId!]
             : null;
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Material(
             color: const Color(0xFF1A1D2D),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withOpacity(0.06)),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                Icons.restaurant,
-                color: _getOrderStatusColor(order.status),
-                size: 32,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _openFoodOrder(order),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withOpacity(0.06)),
+                ),
+                child: Row(
                   children: [
-                    Text(
-                      order.formattedCreatedAt,
-                      style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                    Icon(
+                      Icons.restaurant,
+                      color: _getOrderStatusColor(order.status),
+                      size: 32,
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      restaurant?.name ?? 'Restaurant #${order.restaurantId}',
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w600),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            order.formattedCreatedAt,
+                            style: TextStyle(
+                                color: Colors.grey[400], fontSize: 12),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            restaurant?.name ??
+                                'Restaurant #${order.restaurantId}',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            '${formatMoney(order.grandTotal)} • delivery ${formatMoney(order.deliveryPrice)} • ${order.status ?? 'N/A'}',
+                            style: TextStyle(
+                                color: Colors.grey[400], fontSize: 12),
+                          ),
+                        ],
+                      ),
                     ),
-                    Text(
-                      '${formatMoney(order.grandTotal)} • delivery ${formatMoney(order.deliveryPrice)} • ${order.status ?? 'N/A'}',
-                      style: TextStyle(color: Colors.grey[400], fontSize: 12),
-                    ),
+                    Icon(Icons.chevron_right, color: Colors.grey[600]),
                   ],
                 ),
               ),
-            ],
+            ),
           ),
         );
       },
     );
+  }
+
+  void _openFoodOrder(FoodCheckoutModel order) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FoodCheckoutDetailScreen(checkout: order),
+      ),
+    ).then((_) => _fetchData());
   }
 
   Color _getRideStatusColor(String? status) {

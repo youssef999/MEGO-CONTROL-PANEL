@@ -12,6 +12,7 @@ import '../models/ride_request_model.dart';
 import '../services/admin_notification_sender.dart';
 import '../services/supabase_service.dart';
 import '../widgets/firebase_storage_image.dart';
+import 'food_checkout_detail_screen.dart';
 
 class UserDetailScreen extends StatefulWidget {
   final UserModel user;
@@ -555,10 +556,15 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         final cartItems =
             order.cartId != null ? (_cartItemsByCartId[order.cartId!] ?? []) : const <CartItemModel>[];
         final statusColor = _getOrderStatusColor(order.status);
-        return Container(
+        return Material(
+          color: const Color(0xFF1A1D2D),
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => _openFoodOrder(order),
+            child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: const Color(0xFF1A1D2D),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: Colors.white.withOpacity(0.08)),
           ),
@@ -598,6 +604,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     ),
                   ),
                   _buildStatusPill(order.status, statusColor),
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right, color: Colors.grey[600]),
                 ],
               ),
               const SizedBox(height: 12),
@@ -651,8 +659,19 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               ],
             ],
           ),
+            ),
+          ),
         );
       },
+    );
+  }
+
+  void _openFoodOrder(FoodCheckoutModel order) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FoodCheckoutDetailScreen(checkout: order),
+      ),
     );
   }
 

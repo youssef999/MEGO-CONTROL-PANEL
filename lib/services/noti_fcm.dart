@@ -131,7 +131,8 @@ class NotificationSenderService {
     const body =
         'A restaurant has accepted an order and is looking for a driver.';
     final data = {'type': 'food_order_available', 'order_id': orderId};
-    for (final token in deviceTokens) {
+    // Several driver rows can share one phone's token; send once per device.
+    for (final token in deviceTokens.map((t) => t.trim()).toSet()) {
       if (token.isNotEmpty) {
         await sendNotification(
           deviceToken: token,

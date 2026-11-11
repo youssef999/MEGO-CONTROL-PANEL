@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/category_model.dart';
-import '../services/imgbb_image_upload_service.dart';
+import '../services/image_upload_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/custom_drawer.dart';
 import '../widgets/firebase_storage_image.dart';
@@ -386,8 +386,11 @@ class _FoodCategoriesListScreenState extends State<FoodCategoriesListScreen> {
                                     setDialogState(() => uploading = true);
                                     try {
                                       final url =
-                                          await ImgbbImageUploadService
-                                              .pickCompressAndUpload();
+                                          await ImageUploadService
+                                              .pickCompressAndUpload(
+                                        folder:
+                                            ImageUploadService.folderCategories,
+                                      );
                                       if (url != null) {
                                         imageCtrl.text = url;
                                       }

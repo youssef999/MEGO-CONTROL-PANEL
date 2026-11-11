@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import '../models/restaurant_model.dart';
+import '../models/restaurant_order_stats_model.dart';
 import '../models/category_model.dart';
 import '../services/account_decision_notifier.dart';
 import '../services/supabase_service.dart';
 import '../services/excel_export_service.dart';
-import '../services/imgbb_image_upload_service.dart';
-import '../widgets/firebase_storage_image.dart';
+import '../services/image_upload_service.dart';
 import '../widgets/custom_drawer.dart';
 import '../widgets/reject_reason_dialog.dart';
+import '../widgets/add_restaurant_dialog.dart';
+import '../widgets/restaurants/restaurant_grid_card.dart';
+import 'restaurant_detail_screen.dart';
 import 'restaurant_menu_screen.dart';
 import 'restaurant_wallet_screen.dart';
 
@@ -25,6 +28,10 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
   List<RestaurantModel> _allRestaurants = [];
   List<RestaurantModel> _filteredRestaurants = [];
   List<CategoryModel> _categories = [];
+  Map<int, RestaurantOrderStatsModel> _orderStats = {};
+
+  /// null = all, true = activated, false = needs activation.
+  bool? _statusFilter;
   bool _isLoading = true;
   bool _isExporting = false;
   String? _error;
@@ -56,9 +63,15 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
       _error = null;
     });
     try {
-      final restaurants = await _supabaseService.getRestaurants();
+      final results = await Future.wait([
+        _supabaseService.getRestaurants(),
+        _supabaseService
+            .getRestaurantOrderStats()
+            .catchError((_) => <int, RestaurantOrderStatsModel>{}),
+      ]);
       setState(() {
-        _allRestaurants = restaurants;
+        _allRestaurants = results[0] as List<RestaurantModel>;
+        _orderStats = results[1] as Map<int, RestaurantOrderStatsModel>;
         _filterRestaurants();
         _isLoading = false;
       });
@@ -79,7 +92,9 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
                 (restaurant.name?.toLowerCase().contains(query) ?? false) ||
                 (restaurant.category?.toLowerCase().contains(query) ?? false) ||
                 (restaurant.details?.toLowerCase().contains(query) ?? false);
-            return matchesSearch;
+            final matchesStatus = _statusFilter == null ||
+                restaurant.isAccepted == _statusFilter;
+            return matchesSearch && matchesStatus;
           }).toList();
     });
   }
@@ -156,14 +171,6 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
             tooltip: 'Export Excel',
           ),
           IconButton(
-            onPressed: () => _showRestaurantDialog(),
-            icon: const Icon(
-              Icons.add_circle_outline,
-              color: Colors.greenAccent,
-            ),
-            tooltip: 'Add Restaurant',
-          ),
-          IconButton(
             onPressed: () {
               _searchController.clear();
               _fetchRestaurants();
@@ -179,34 +186,74 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildStatsHeader(),
-            const SizedBox(height: 32),
-            _buildSearch(),
             const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(child: _buildSearch()),
+                const SizedBox(width: 16),
+                _buildAddRestaurantButton(),
+              ],
+            ),
+            const SizedBox(height: 14),
+            _buildStatusFilters(),
+            const SizedBox(height: 16),
             Expanded(
-              child: Container(
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A1D2D),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.3),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child:
-                    _isLoading
-                        ? const Center(child: CircularProgressIndicator())
-                        : _error != null
-                        ? _buildErrorWidget()
-                        : _filteredRestaurants.isEmpty
-                        ? const Center(child: Text('No restaurants found.'))
-                        : _buildDataTable(),
-              ),
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                      ? _buildErrorWidget()
+                      : _filteredRestaurants.isEmpty
+                          ? const Center(child: Text('No restaurants found.'))
+                          : _buildGrid(),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddRestaurantButton() {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF7C4DFF), Color(0xFF3DDC97)],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF7C4DFF).withOpacity(0.35),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _showAddRestaurantDialog,
+          child: const SizedBox(
+            height: 52,
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 22),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.add_business_rounded, color: Colors.white),
+                  SizedBox(width: 10),
+                  Text(
+                    'Add Restaurant',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -247,269 +294,80 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
     );
   }
 
-  Widget _buildDataTable() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SingleChildScrollView(
-        child: DataTable(
-          headingRowHeight: 60,
-          dataRowMaxHeight: 70,
-          columns: const [
-            DataColumn(label: Text('IMAGE', style: _headerStyle)),
-            DataColumn(label: Text('NAME', style: _headerStyle)),
-            DataColumn(label: Text('CATEGORY', style: _headerStyle)),
-            DataColumn(label: Text('STATUS', style: _headerStyle)),
-            DataColumn(label: Text('RATING', style: _headerStyle)),
-            DataColumn(label: Text('ACTIONS', style: _headerStyle)),
-          ],
-          rows:
-              _filteredRestaurants
-                  .map((restaurant) => _buildDataRow(restaurant))
-                  .toList(),
-        ),
-      ),
-    );
-  }
+  Widget _buildStatusFilters() {
+    Widget chip(String label, bool? value, int count) {
+      return ChoiceChip(
+        label: Text('$label ($count)'),
+        selected: _statusFilter == value,
+        onSelected: (_) {
+          _statusFilter = value;
+          _filterRestaurants();
+        },
+        selectedColor: Colors.deepPurpleAccent.withOpacity(0.35),
+        backgroundColor: const Color(0xFF1A1D2D),
+        labelStyle: const TextStyle(color: Colors.white, fontSize: 12),
+      );
+    }
 
-  DataRow _buildDataRow(RestaurantModel restaurant) {
-    final accepted = restaurant.isAccepted;
-    return DataRow(
-      cells: [
-        DataCell(
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child:
-                  restaurant.image != null
-                      ? FirebaseStorageImage(
-                        imageUrl: restaurant.image!,
-                        width: 50,
-                        height: 50,
-                        fit: BoxFit.cover,
-                        fallbackIcon: Icons.restaurant,
-                      )
-                      : Container(
-                        width: 50,
-                        height: 50,
-                        color: Colors.grey[800],
-                        child: const Icon(Icons.restaurant, color: Colors.grey),
-                      ),
-            ),
-          ),
-        ),
-        DataCell(
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                restaurant.name ?? 'Unknown',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              _buildAcceptanceBadge(accepted),
-              if (restaurant.details != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  restaurant.details!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: Colors.grey[500], fontSize: 11),
-                ),
-              ],
-            ],
-          ),
-        ),
-        DataCell(
-          Text(
-            restaurant.category ?? 'N/A',
-            style: TextStyle(color: Colors.grey[400]),
-          ),
-        ),
-        DataCell(_buildAcceptanceBadge(accepted, compact: false)),
-        DataCell(
-          Row(
-            children: [
-              const Icon(Icons.star, color: Colors.amber, size: 16),
-              const SizedBox(width: 4),
-              Text(
-                restaurant.rateLabel,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-        ),
-        DataCell(
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                onPressed: () => accepted
-                    ? _rejectRestaurant(restaurant, blocked: true)
-                    : _confirmToggleAccepted(restaurant),
-                icon: Icon(
-                  accepted ? Icons.block : Icons.check_circle_outline,
-                  color: accepted ? Colors.redAccent : Colors.greenAccent,
-                  size: 20,
-                ),
-                tooltip: accepted
-                    ? 'Block restaurant (with reason)'
-                    : 'Activate restaurant',
-              ),
-              if (!accepted)
-                IconButton(
-                  onPressed: () =>
-                      _rejectRestaurant(restaurant, blocked: false),
-                  icon: const Icon(
-                    Icons.gpp_bad_outlined,
-                    color: Colors.orangeAccent,
-                    size: 20,
-                  ),
-                  tooltip: 'Reject with reason',
-                ),
-              IconButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        RestaurantWalletScreen(restaurant: restaurant),
-                  ),
-                ),
-                icon: const Icon(
-                  Icons.account_balance_wallet_outlined,
-                  color: Colors.tealAccent,
-                  size: 20,
-                ),
-                tooltip: 'Restaurant wallet',
-              ),
-              IconButton(
-                onPressed:
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder:
-                            (context) => RestaurantMenuScreen(
-                              restaurantId: restaurant.id,
-                              restaurantName: restaurant.name ?? 'Restaurant',
-                            ),
-                      ),
-                    ),
-                icon: const Icon(
-                  Icons.restaurant_menu,
-                  color: Colors.purpleAccent,
-                  size: 20,
-                ),
-                tooltip: 'View Menu',
-              ),
-              IconButton(
-                onPressed: () => _showRestaurantDialog(restaurant: restaurant),
-                icon: const Icon(
-                  Icons.edit_outlined,
-                  color: Colors.blueAccent,
-                  size: 20,
-                ),
-                tooltip: 'Edit Restaurant',
-              ),
-              IconButton(
-                onPressed: () => _showDeleteConfirmation(restaurant),
-                icon: const Icon(
-                  Icons.delete_outline,
-                  color: Colors.redAccent,
-                  size: 20,
-                ),
-                tooltip: 'Delete Restaurant',
-              ),
-            ],
-          ),
-        ),
+    final activated = _allRestaurants.where((r) => r.isAccepted).length;
+    return Wrap(
+      spacing: 8,
+      children: [
+        chip('All', null, _allRestaurants.length),
+        chip('Activated', true, activated),
+        chip('Needs activation', false, _allRestaurants.length - activated),
       ],
     );
   }
 
-  Widget _buildAcceptanceBadge(bool accepted, {bool compact = true}) {
-    final color = accepted ? const Color(0xFF3DDC97) : const Color(0xFFFF8A65);
-    final title = accepted ? 'Activated' : 'Needs activation';
-    final subtitle = accepted
-        ? 'Live & ready for orders'
-        : 'Blocked — activate to go live';
-    final icon = accepted ? Icons.verified_rounded : Icons.hourglass_top_rounded;
+  Widget _buildGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.only(bottom: 24),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 320,
+        mainAxisExtent: 300,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: _filteredRestaurants.length,
+      itemBuilder: (context, i) {
+        final restaurant = _filteredRestaurants[i];
+        return RestaurantGridCard(
+          restaurant: restaurant,
+          stats: _orderStats[restaurant.id] ?? RestaurantOrderStatsModel.empty,
+          onAction: (action) => _onCardAction(restaurant, action),
+        );
+      },
+    );
+  }
 
-    if (compact) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.14),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withOpacity(0.45)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 13, color: color),
-            const SizedBox(width: 5),
-            Text(
-              title,
-              style: TextStyle(
-                color: color,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      );
+  void _onCardAction(RestaurantModel restaurant, RestaurantCardAction action) {
+    void open(Widget screen) {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => screen))
+          .then((_) => _fetchRestaurants());
     }
 
-    return Container(
-      constraints: const BoxConstraints(minWidth: 150),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.4)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.18),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 16, color: color),
-          ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: Colors.grey[400],
-                    fontSize: 10.5,
-                    height: 1.2,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+    switch (action) {
+      case RestaurantCardAction.details:
+        open(RestaurantDetailScreen(restaurant: restaurant));
+      case RestaurantCardAction.menu:
+        open(RestaurantMenuScreen(
+          restaurantId: restaurant.id,
+          restaurantName: restaurant.name ?? 'Restaurant',
+        ));
+      case RestaurantCardAction.wallet:
+        open(RestaurantWalletScreen(restaurant: restaurant));
+      case RestaurantCardAction.edit:
+        _showRestaurantDialog(restaurant: restaurant);
+      case RestaurantCardAction.toggle:
+        restaurant.isAccepted
+            ? _rejectRestaurant(restaurant, blocked: true)
+            : _confirmToggleAccepted(restaurant);
+      case RestaurantCardAction.reject:
+        _rejectRestaurant(restaurant, blocked: false);
+      case RestaurantCardAction.delete:
+        _showDeleteConfirmation(restaurant);
+    }
   }
 
   Widget _buildErrorWidget() {
@@ -606,16 +464,43 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
     );
   }
 
-  Future<void> _showRestaurantDialog({RestaurantModel? restaurant}) async {
-    final isEditing = restaurant != null;
-    final nameController = TextEditingController(text: restaurant?.name);
-    String? selectedCategory = restaurant?.category;
-    final detailsController = TextEditingController(text: restaurant?.details);
-    final emailController = TextEditingController(text: restaurant?.email);
-    final passwordController = TextEditingController(
-      text: restaurant?.password,
+  Future<void> _showAddRestaurantDialog() async {
+    if (_categories.isEmpty) await _fetchCategories();
+    if (!mounted) return;
+    final created = await showAddRestaurantDialog(
+      context,
+      categories: _categories,
+      onSubmit: (restaurant) async {
+        try {
+          if (await _supabaseService.restaurantEmailExists(restaurant.email)) {
+            return 'A restaurant with this email already exists';
+          }
+          await _supabaseService.createRestaurant(restaurant);
+          return null;
+        } catch (e) {
+          return 'Could not create restaurant: $e';
+        }
+      },
     );
-    final imageController = TextEditingController(text: restaurant?.image);
+    if (created != true || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Restaurant created and activated'),
+        backgroundColor: Colors.green.shade800,
+      ),
+    );
+    _fetchRestaurants();
+  }
+
+  Future<void> _showRestaurantDialog({required RestaurantModel restaurant}) async {
+    final nameController = TextEditingController(text: restaurant.name);
+    String? selectedCategory = restaurant.category;
+    final detailsController = TextEditingController(text: restaurant.details);
+    final emailController = TextEditingController(text: restaurant.email);
+    final passwordController = TextEditingController(
+      text: restaurant.password,
+    );
+    final imageController = TextEditingController(text: restaurant.image);
     final formKey = GlobalKey<FormState>();
 
     await showDialog(
@@ -626,9 +511,9 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
           builder: (context, setDialogState) {
             return AlertDialog(
               backgroundColor: const Color(0xFF1A1D2D),
-              title: Text(
-                isEditing ? 'Edit Restaurant' : 'Add Restaurant',
-                style: const TextStyle(color: Colors.white),
+              title: const Text(
+                'Edit Restaurant',
+                style: TextStyle(color: Colors.white),
               ),
               content: SingleChildScrollView(
                 child: Form(
@@ -667,7 +552,7 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
                           Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: IconButton(
-                              tooltip: 'Pick image, compress & upload (ImgBB)',
+                              tooltip: 'Pick image, compress & upload',
                               onPressed:
                                   uploadingImage
                                       ? null
@@ -677,7 +562,10 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
                                         );
                                         try {
                                           final url =
-                                              await ImgbbImageUploadService.pickCompressAndUpload();
+                                              await ImageUploadService.pickCompressAndUpload(
+                                                folder: ImageUploadService
+                                                    .folderRestaurants,
+                                              );
                                           if (url != null) {
                                             imageController.text = url;
                                           }
@@ -733,18 +621,17 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
                     if (formKey.currentState!.validate()) {
                       Navigator.pop(dialogContext);
                       _saveRestaurant(
-                        isEditing ? restaurant.id : 0,
+                        restaurant,
                         nameController.text,
                         selectedCategory ?? '',
                         detailsController.text,
                         emailController.text,
                         passwordController.text,
                         imageController.text,
-                        isEditing,
                       );
                     }
                   },
-                  child: Text(isEditing ? 'Update' : 'Add'),
+                  child: const Text('Update'),
                 ),
               ],
             );
@@ -832,36 +719,28 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
   }
 
   Future<void> _saveRestaurant(
-    int id,
+    RestaurantModel original,
     String name,
     String category,
     String details,
     String email,
     String password,
     String image,
-    bool isEditing,
   ) async {
     setState(() => _isLoading = true);
     try {
-      final existing = isEditing
-          ? _allRestaurants.where((r) => r.id == id).toList()
-          : <RestaurantModel>[];
       final restaurant = RestaurantModel(
-        id: id, // ID is ignored for Add in SupabaseService
+        id: original.id,
         name: name,
         category: category,
         details: details,
         email: email.isNotEmpty ? email : null,
         password: password.isNotEmpty ? password : null,
         image: image.isNotEmpty ? image : null,
-        isAccepted: existing.isNotEmpty ? existing.first.isAccepted : false,
+        deviceToken: original.deviceToken,
+        isAccepted: original.isAccepted,
       );
-
-      if (isEditing) {
-        await _supabaseService.updateRestaurant(restaurant);
-      } else {
-        await _supabaseService.addRestaurant(restaurant);
-      }
+      await _supabaseService.updateRestaurant(restaurant);
       _fetchRestaurants();
     } catch (e) {
       setState(() {
@@ -1059,11 +938,4 @@ class _RestaurantsListScreenState extends State<RestaurantsListScreen> {
       });
     }
   }
-
-  static const _headerStyle = TextStyle(
-    fontWeight: FontWeight.bold,
-    color: Colors.deepPurpleAccent,
-    letterSpacing: 1.1,
-    fontSize: 12,
-  );
 }

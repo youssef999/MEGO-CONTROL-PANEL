@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/menu_model.dart';
 import '../models/category_model.dart';
 import '../services/supabase_service.dart';
-import '../services/imgbb_image_upload_service.dart';
+import '../services/image_upload_service.dart';
 import '../widgets/firebase_storage_image.dart';
 
 class RestaurantMenuScreen extends StatefulWidget {
@@ -127,7 +127,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                           Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: IconButton(
-                              tooltip: 'Pick image, compress & upload (ImgBB)',
+                              tooltip: 'Pick image, compress & upload',
                               onPressed:
                                   uploadingImage
                                       ? null
@@ -137,7 +137,10 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                         );
                                         try {
                                           final url =
-                                              await ImgbbImageUploadService.pickCompressAndUpload();
+                                              await ImageUploadService.pickCompressAndUpload(
+                                                folder: ImageUploadService
+                                                    .folderMenuItems,
+                                              );
                                           if (url != null) {
                                             imageController.text = url;
                                           }

@@ -6,6 +6,8 @@ import '../models/coupon_model.dart';
 import '../models/food_checkout_model.dart';
 import '../models/food_order_settlement_model.dart';
 import '../models/restaurant_model.dart';
+import '../models/new_restaurant_model.dart';
+import '../models/restaurant_order_stats_model.dart';
 import '../models/food_table_coupon_model.dart';
 import '../models/payment_model.dart';
 import '../models/ride_app_commission_model.dart';
@@ -444,6 +446,37 @@ class SupabaseService {
     }
   }
 
+  Future<List<FoodCheckoutModel>> getFoodCheckoutsByRestaurantId(
+    int restaurantId,
+  ) async {
+    final response = await _supabase
+        .from('food_checkout')
+        .select()
+        .eq('restaurant_id', restaurantId)
+        .order('created_at', ascending: false);
+    return (response as List)
+        .map((json) => FoodCheckoutModel.fromJson(json))
+        .toList();
+  }
+
+  /// Order counters for every restaurant (one light query).
+  Future<Map<int, RestaurantOrderStatsModel>> getRestaurantOrderStats() async {
+    final response = await _supabase.from('food_checkout').select(
+          'id, created_at, restaurant_id, status, total, delivery_price, '
+          'food_subtotal, discount_amount',
+        );
+    final byRestaurant = <int, List<FoodCheckoutModel>>{};
+    for (final row in response as List) {
+      final order = FoodCheckoutModel.fromJson(row);
+      final id = order.restaurantId;
+      if (id == null) continue;
+      byRestaurant.putIfAbsent(id, () => []).add(order);
+    }
+    return byRestaurant.map(
+      (id, orders) => MapEntry(id, RestaurantOrderStatsModel.fromOrders(orders)),
+    );
+  }
+
   Future<List<FoodCheckoutModel>> getFoodCheckoutsByDriverId(String driverId) async {
     try {
       final response = await _supabase
@@ -588,16 +621,24 @@ class SupabaseService {
     }
   }
 
-  Future<void> addRestaurant(RestaurantModel restaurant) async {
-    try {
-      final data = restaurant.toJson();
-      data.remove('id'); // ID is auto-generated
-      data['rate'] = 0;
-      await _supabase.from('restaurants').insert(data);
-    } catch (e) {
-      print('Error adding restaurant: $e');
-      rethrow;
-    }
+  Future<bool> restaurantEmailExists(String email) async {
+    final row = await _supabase
+        .from('restaurants')
+        .select('id')
+        .eq('email', email.trim())
+        .limit(1)
+        .maybeSingle();
+    return row != null;
+  }
+
+  /// Admin-created restaurant: live immediately, no `rate` on insert.
+  Future<RestaurantModel> createRestaurant(NewRestaurantModel restaurant) async {
+    final row = await _supabase
+        .from('restaurants')
+        .insert(restaurant.toInsertJson())
+        .select()
+        .single();
+    return RestaurantModel.fromJson(row);
   }
 
   Future<void> updateRestaurant(RestaurantModel restaurant) async {
